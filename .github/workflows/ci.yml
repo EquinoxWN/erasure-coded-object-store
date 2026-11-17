@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: the workflow can read the code and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Every action is pinned to a full commit SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.11"
+          cache-dependency-path: go.mod
+      # gofmt, go vet, tests with the race detector, and the in-process durability sweep
+      - run: make ci
+      - name: Durability verdict
+        run: |
+          if grep -q '^verdict: every object read back' bench.txt; then
+            echo "::notice::bench: $(grep '^verdict' bench.txt | head -n 1 | sed 's/^verdict: //')"
+          else
+            echo "::error::bench verdict missing"
+            exit 1
+          fi
+      # Real multi-process cluster: six `serve` processes, nodes stopped one by one
+      - name: Six-process cluster over HTTP
+        run: make cluster
+      - name: Known-vulnerability audit
+        run: make audit
